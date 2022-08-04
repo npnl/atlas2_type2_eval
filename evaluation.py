@@ -1,21 +1,22 @@
 from bidsio import BIDSLoader
+from grandchallenges.loader import GrandChallengesLoader
 import pandas as pd
 import json
 from collections import defaultdict
 import numpy as np
 from multiprocessing import Pool
 from settings import eval_settings
+from copy import deepcopy
 
-
-def evaluate(bids_loader: BIDSLoader,
+def evaluate(loader,
              scoring_functions: dict) -> dict:
     '''
     Evaluates the prediction:truth pairs stored in the loader according to the scoring functions. Returns a dict
     containing the scores for each pair, keyed identically to scoring_functions.
     Parameters
     ----------
-    bids_loader : BIDSLoader
-        BIDSLoader containing predictions in .data_list and the ground_truth in .target_list.
+    loader : BIDSLoader or GrandChallengesLoader
+        Loader that returns (predictions, ground_truth) with the load_batches() method.
     scoring_functions : dict
         Dictionary of scoring functions to use to evaluate predictions, keyed by the desired output name.
     Returns
@@ -26,8 +27,19 @@ def evaluate(bids_loader: BIDSLoader,
     '''
     score_results = defaultdict(list)
     # Iterate through data
-    for prediction, truth in bids_loader.load_batches():
+    for prediction, truth in loader.load_batches():
         # Score
+        for score_name, score in scoring_functions.items():
+            scores = score(truth=truth, prediction=prediction, batchwise=True)
+            score_results[score_name] += scores
+    return score_results
+
+def eval_gc(loader, scoring_functions: dict) -> dict:
+    '''
+    '''
+    score_results = defaultdict(list)
+    for prediction, truth in loader.load_eval_batches():
+        # score
         for score_name, score in scoring_functions.items():
             scores = score(truth=truth, prediction=prediction, batchwise=True)
             score_results[score_name] += scores
@@ -96,27 +108,44 @@ def make_subloader_and_evaluate(data_list, data_shape, target_list, target_shape
 
 
 if __name__ == "__main__":
-    # Get data to pass to workers
-    loader = BIDSLoader(data_root=[eval_settings['PredictionRoot']],
-                        target_root=[eval_settings['GroundTruthRoot']],
-                        data_derivatives_names=eval_settings['PredictionBIDSDerivativeName'],
-                        target_derivatives_names=eval_settings['GroundTruthBIDSDerivativeName'],
-                        target_entities=eval_settings['GroundTruthEntities'],
-                        data_entities=eval_settings['PredictionEntities'])
-    # Parallelize data
-    num_proc = eval_settings['Multiprocessing']
-    loader_idx_list = np.floor(np.linspace(0, len(loader), num_proc+1)).astype(int)
-    pool_arg_list = []
-    # Break up dataset into roughly equal portions
-    for idx in range(num_proc):
-        start_idx, end_idx = loader_idx_list[idx:idx+2]
-        data_list = loader.data_list[start_idx:end_idx]
-        target_list = loader.target_list[start_idx:end_idx]
-        pool_arg_list.append([data_list, loader.data_shape, target_list, loader.target_shape, eval_settings])
-
-    # Parallel stuff
+    num_proc = eval_settings["Multiprocessing"]
     pool = Pool(num_proc)
-    pool_scores = pool.starmap(make_subloader_and_evaluate, pool_arg_list)
+    if(eval_settings["UseBIDSLoader"]):
+        loader = BIDSLoader(data_root=[eval_settings['PredictionRoot']],
+                            target_root=[eval_settings['GroundTruthRoot']],
+                            data_derivatives_names=eval_settings['PredictionBIDSDerivativeName'],
+                            target_derivatives_names=eval_settings['GroundTruthBIDSDerivativeName'],
+                            target_entities=eval_settings['GroundTruthEntities'],
+                            data_entities=eval_settings['PredictionEntities'])
+        # Parallelize data
+        loader_idx_list = np.floor(np.linspace(0, len(loader), num_proc+1)).astype(int)
+        pool_arg_list = []
+        # Break up dataset into roughly equal portions
+        for idx in range(num_proc):
+            start_idx, end_idx = loader_idx_list[idx:idx+2]
+            data_list = loader.data_list[start_idx:end_idx]
+            target_list = loader.target_list[start_idx:end_idx]
+            pool_arg_list.append([data_list, loader.data_shape, target_list, loader.target_shape, eval_settings])
+        # Start parallel job
+        pool_scores = pool.starmap(make_subloader_and_evaluate, pool_arg_list)
+    else:
+        loader = GrandChallengesLoader(eval_settings["GrandLoaderSettings"])
+        loader_idx_list = np.floor(np.linspace(0, len(loader), num_proc+1)).astype(int)
+        # loader_list = []
+        pool_arg_list = []
+        # Break up dataset; don't need to work around BIDS here
+        for idx in range(num_proc):
+            start_idx, end_idx = loader_idx_list[idx:idx+2]
+            # pred_list = loader.prediction_list[start_idx : end_idx]
+            pred_list = loader.prediction_paths[start_idx:end_idx]
+            ground_truth_list = loader.ground_truth_paths[start_idx:end_idx]
+
+            loader_subpart = deepcopy(loader)
+            loader_subpart.prediction_paths = pred_list
+            loader_subpart.ground_truth_paths = ground_truth_list
+            # loader_list.append(loader_subpart)
+            pool_arg_list.append((loader_subpart, eval_settings['ScoringFunctions']))
+        pool_scores = pool.starmap(eval_gc, pool_arg_list)
 
     # Combine scores into single dict
     scores_dict = merge_dict(pool_scores)

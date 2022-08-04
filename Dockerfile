@@ -15,12 +15,16 @@ RUN python -m pip install --user -U pip
 COPY --chown=evaluator:evaluator requirements.txt /opt/evaluation/
 RUN python -m pip install --user -r requirements.txt
 
-
-COPY --chown=evaluator:evaluator ground-truth /opt/evaluation/ground-truth
-
+# Code
 COPY --chown=evaluator:evaluator evaluation.py /opt/evaluation/
 COPY --chown=evaluator:evaluator settings.py /opt/evaluation/
 ADD --chown=evaluator:evaluator isles/ /opt/evaluation/isles/
-ADD --chown=evaluator:evaluator sample_bids/ /opt/evaluation/sample_bids/
+
+#ADD --chown=evaluator:evaluator sample_bids/ /opt/evaluation/sample_bids/
+ADD --chown=evaluator:evaluator grandchallenges/ /opt/evaluation/grandchallenges/
+#ADD --chown=evaluator:evaluator gc_output/ /output/images/stroke-segmentation/
+# Data
+# ADD --chown=evaluator:evaluator hidden_mha_masks /opt/evaluation/mha_masks/
+ADD --chown=evaluator:evaluator atlas_algo_sanitydat /opt/evaluation/mha_masks/
 
 ENTRYPOINT "python" "-m" "evaluation"
