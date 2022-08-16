@@ -74,7 +74,7 @@ def volume_difference(truth, prediction, batchwise=False):
     '''
     if(not batchwise):
         pred_vol = np.sum(prediction)
-        truth_vol = np.sum(prediction)
+        truth_vol = np.sum(truth)
         return np.abs(pred_vol - truth_vol)
     else:
         pred_shape = prediction.shape
